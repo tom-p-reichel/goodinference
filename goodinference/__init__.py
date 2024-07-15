@@ -109,13 +109,25 @@ def aligns(a,b):
     assert((torch.diag(mat) >= 0.99).all())
 
 
+from contextlib import contextmanager
+
+import time
+
+@contextmanager
+def print_time(*args,**kwargs):
+    t = time.time()
+
+    try:
+        yield None
+    finally:
+        print("elapsed ",time.time()-t)
 
 if __name__=="__main__":
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = "cuda" # the device to load the model onto
 
-    model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2",load_in_8bit=True)
+    model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2",load_in_4bit=True)
     tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
 
     tokenizer.pad_token = tokenizer.eos_token
@@ -126,20 +138,31 @@ if __name__=="__main__":
     
     test_data = []
 
-    words = ["epic","high","low","rock","paper","scissor"]
+    words = ["rock","paper","scissors"]
 
-    for _ in range(100):
+    mlen = 0
+
+    for _ in range(1000):
         test_data.append(" ".join(random.choices(words,k=random.randint(15,100))))
-   
+
+        mlen = max(mlen,len(tokenizer(test_data[-1]).input_ids))
+    
+    print("max len",mlen)
     for reduce in ["mean","last"]:
         
-        a = embed(model,tokenizer,test_data,max_tokens=120,progress=True,reduce=reduce)
+        print("ours")
+        with print_time():
+            a = embed(model,tokenizer,test_data,max_tokens=mlen*4-10,progress=True,reduce=reduce)
+        
+        a_diff = embed(model,tokenizer,test_data,max_tokens=120,progress=True,reduce=reduce)
+        
+        print("naive")
+        with print_time():
+            b = embed_naive(model,tokenizer,test_data,progress=True,reduce=reduce)
 
-        a_diff = embed(model,tokenizer,test_data,max_tokens=240,progress=True,reduce=reduce)
-
-        b = embed_naive(model,tokenizer,test_data,progress=True,reduce=reduce)
-
-        c = embed_chunk(model,tokenizer,test_data,progress=True,reduce=reduce)
+        print("simple batch")
+        with print_time():
+            c = embed_chunk(model,tokenizer,test_data,progress=True,reduce=reduce)
 
 
         aligns(a,b)
